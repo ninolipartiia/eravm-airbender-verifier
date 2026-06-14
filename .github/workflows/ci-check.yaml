@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CI_BATCHES: 506093.bin.gz,506155.bin.gz,506169.bin.gz
+  CI_BATCHES: 506093.bin.gz,506155.bin.gz,506169.bin.gz,67912.bin.gz
 
 jobs:
   lints:
