@@ -5963,6 +5963,7 @@ dependencies = [
  "ark-bls12-381",
  "ark-ff 0.5.0",
  "serde",
+ "serde_json",
  "tracing",
  "zksync_cli_utils",
  "zksync_contracts",
