@@ -4,6 +4,12 @@
 (`6df5f56`) + **PR#92** cherry-picked (`1dc7ce8`, `program_cache.rs` present).
 **Date:** 2026-08-08. **Owner:** security review.
 
+> **Independent review:** see [`INDEPENDENT-REVIEW.md`](INDEPENDENT-REVIEW.md). Verdict:
+> the conclusion is correct and conservative. One label fix (F1): this branch is **#92-only**,
+> where a re-decode is the **no-clone 46.25M** guest cyc (`bytecode_cache` serves repeats);
+> the **47.43M** used below is the **#92+#93** figure (adds the `load_factory_dep` clone).
+> Both are measured; the multiple is **~190×–270× over 2³⁶** either way.
+
 ## What we are testing
 
 PR#92 replaces the fast VM's unbounded decoded-`Program` cache (`World::decommit`)
