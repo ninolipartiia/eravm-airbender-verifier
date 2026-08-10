@@ -41,5 +41,18 @@ ATTACK-BATCH-SPEC.md`).
 - If genesis bootstrapping is infeasible in reasonable effort, **descope**: the
   Tier1×Tier2 product already establishes the DoS quantitatively.
 
-## Status
-Planned. To be implemented only after Tier 1 is run and compared to expectations.
+## Status — DONE (PASS), with the documented descope
+
+Implemented as an in-crate test (`crates/multivm/src/versions/vm_fast/dos_tier3_test.rs`)
+that drives the **real** `ProgramCache` + **real** `World::decommit`. Result
+(`../results/tier3lite/`): BOUNDED (64 MiB, #92) → **99/99** thrash re-decodes (100% miss);
+UNBOUNDED (`usize::MAX`, main) → **0/99**; real `World::decommit` = 6.39 ms/call. The
+bounded-vs-unbounded control is the **causation proof** Tiers 1–2 lacked.
+
+**Descope taken (as pre-registered):** the full bootloader-driven `FastVmInstance` tx run
+was *not* built — it needs a synthesized valid tx + a complete genesis/read-set
+(`StorageSnapshot` panics on any missing slot; no in-repo witness producer), i.e. the
+node-gated blocker. The `World::decommit` call this test drives is exactly what vm2 invokes
+per far call via `pay_for_decommit`; the far-call opcode's own erg cost (which bounds the
+miss *count*) is accounted analytically in Tier 1. This is the closest node-free
+approximation and it establishes causation on the real code.

@@ -38,14 +38,16 @@ Key constants (all source-verified — see `INVESTIGATION` section):
 | --- | --- | --- | --- | --- |
 | **Tier 1** | attack **economics**: 100%-miss FIFO behavior + forced-decode **count** under an 80M budget, against real `Program::new` + a verbatim `ProgramCache` | model of the cache path | no | **PASS** → `results/tier1/` |
 | **Tier 2** | **real guest cycles** per `Program::new` (rv32, via the transpiler) — the per-miss cost | real guest cycles, isolated decode | no | **done** → `results/tier2/`, `../artifacts/decode-bench/` |
-| **Tier 3-lite** | native whole-VM execution of the literal 1-tx attack, bootstrapped off the real `84730` genesis, counting decommits/re-decodes | real bootloader-driven VM run | no | planned (awaiting go-ahead) |
+| **Tier 3-lite** | real `ProgramCache` + real `World::decommit`, with a **bounded-vs-unbounded causation control** (descoped from full bootloader run — node-gated) | real #92 code path | no | **PASS** → `results/tier3lite/` |
 
-## Headline result so far (Tier 1 × Tier 2, two independent methods agree)
+## Headline result (all three tiers agree)
 
 A single ≤80M-gas transaction forces **~285k–390k** full `Program::new` re-decodes
 (Tier 1), each **~47.4M** guest cycles (Tier 2) ⇒ **1.35–1.85×10¹³ cycles = 197×–269×
-over the 2³⁶ ceiling.** Break-even is only **~1,449 misses (~11% of one tx's gas)**. The
-batch is unprovable; the DoS is confirmed with wide margin.
+over the 2³⁶ ceiling.** Break-even is only **~1,449 misses (~11% of one tx's gas)**.
+Tier 3-lite proves **causation on the real code**: the same workload re-decodes **99/99**
+times under #92's bounded cache and **0/99** on main's unbounded cache. The batch is
+unprovable; the DoS is confirmed with wide margin, and attributable to #92.
 
 **Product that proves the DoS:** (Tier 1 forced-miss count) × (Tier 2 cyc/decode) vs 2³⁶.
 

@@ -1,0 +1,17 @@
+=== Tier 3-lite — real ProgramCache / World::decommit (PR#92 cycle-DoS) ===
+config: 33 contracts x 2097120 B (65535 words) = 66.0 MiB working set; #92 cap = 64 MiB; 3 thrash passes
+
+-- Part B: real ProgramCache (miss == re-decode, by construction) --
+  BOUNDED  (64 MiB, #92):   fill_misses=33/33  thrash_misses=99/99  (100% thrash miss)
+  UNBOUNDED(usize::MAX,main):fill_misses=33/33  thrash_misses=0/99  (0% thrash miss)
+
+-- Part A: real World::decommit (full path) --
+  99 thrash far-calls, 6.39 ms/call (a cache HIT would be ~µs; ms-scale ⇒ real re-decode)
+
+CAUSATION: #92's bounded cache turns 99 far-calls into 99 full re-decodes;
+the unbounded cache (main) does 0. #92 is the cause of the re-decode DoS.
+=== TIER 3-lite PASS ===
+
+test versions::vm_fast::dos_tier3_test::dos_tier3_redecode_causation ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 2.88s
