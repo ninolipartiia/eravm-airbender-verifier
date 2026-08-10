@@ -10,8 +10,11 @@ pub use self::{
 };
 
 mod bytecode;
+#[cfg(test)]
+mod dos_tier3_test;
 mod events;
 mod glue;
+mod program_cache;
 mod tracers;
 mod utils;
 mod version;

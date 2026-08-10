@@ -1,0 +1,28 @@
+=== Tier 1 — native FIFO-economics simulation (PR#92 cycle-DoS) ===
+
+config: 33 contracts x 2097120 B (65535 words) = 66.00 MiB working set; cap = 64 MiB
+
+-- Phase 1 (fill): 33 first-time far-calls --
+  misses=33 hits=0 decodes=33 evictions=1 | cache steady-state = 32 entries (63 MiB)
+
+-- Phase 2 (thrash): 5 cyclic passes = 165 far-calls --
+  misses=165 hits=0 decodes=165 evictions=165 | MISS RATE = 100.0%
+  native decode cost = 7.47 ms/decode (2 MiB, x86)
+
+-- Structural checks --
+  [PASS] 100% post-fill miss rate (0 hits)
+  [PASS] steady-state cache = 32 entries
+  [PASS] 1 eviction per thrash far-call
+
+-- Budget model (one 80M-gas tx) --
+  fill cost = 8656659 ergs (8.66M); thrash budget = 71343341 ergs (71.34M)
+   per-iter ergs         misses  total guest cyc       x 2^36
+             183         389854         1.849e13       269.1x
+             223         319925         1.518e13       220.8x
+             250         285373         1.354e13       197.0x
+
+  break-even: 1449 misses reach 2^36  ->  fill + 1449*183 = 8921826 ergs (11.2% of one 80M tx)
+
+  (native wall-time to actually run all 389854 decodes ~= 48.5 min at 7.5 ms each — why we extrapolate)
+
+=== TIER 1 PASS ===

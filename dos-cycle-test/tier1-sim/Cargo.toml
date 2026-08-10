@@ -1,0 +1,20 @@
+# Standalone: not part of the verifier workspace (own vm2 resolution).
+[workspace]
+
+[package]
+name = "tier1-sim"
+version = "0.1.0"
+edition = "2021"
+
+# Tier 1 of the PR#92 cycle-DoS validation: native FIFO-economics simulation.
+# Uses the same vm2 release the verifier pins (v0.6.0) so `Program::new` is the
+# exact decode the guest runs. `Program::new` is byte-identical across vm2
+# v0.6.0 / master / the sparse bundle (the 4 PRs touch stack.rs/heap.rs, not
+# program.rs), so the decode cost is representation-independent.
+
+[dependencies]
+zksync_vm2 = { git = "https://github.com/matter-labs/vm2", tag = "v0.6.0", features = ["airbender-precompile-delegations"] }
+primitive-types = "0.12.2"
+
+[profile.release]
+opt-level = 3
