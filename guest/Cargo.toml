@@ -14,9 +14,15 @@ license.workspace = true
 # `relax-version-pin` additionally drops a soundness check.
 cycle-markers = ["zksync_airbender_verifier/cycle-markers"]
 relax-version-pin = ["zksync_airbender_verifier/relax-version-pin"]
+# Calibration-only: swaps main() for a Program::new decode micro-bench used to
+# measure the PR#92 re-decode cycle cost. NEVER a shippable guest.
+decode-bench = ["dep:zksync_vm2", "dep:primitive-types", "dep:serde"]
 
 [dependencies]
 airbender = { workspace = true, features = ["std"] }
+zksync_vm2 = { workspace = true, optional = true }
+primitive-types = { version = "0.12.2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
 # Explicit path dep (not `workspace = true`) so `default-features = false` is
 # honored — Cargo ignores that override on workspace-inherited deps. This drops
 # the sequencer-only circuit tracer: the proving guest never reads

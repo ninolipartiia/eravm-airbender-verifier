@@ -1677,7 +1677,10 @@ name = "eravm-prover-guest"
 version = "29.9.0"
 dependencies = [
  "airbender-sdk",
+ "primitive-types",
+ "serde",
  "zksync_airbender_verifier",
+ "zksync_vm2",
 ]
 
 [[package]]

@@ -45,14 +45,18 @@ grep -q -- "--defsym=_heap_size=$bytes" "$cfg" || {
   exit 1
 }
 
-echo "[probe] building guest with ${heap_mib} MiB heap ..." >&2
-( cd "$repo_root/guest" && cargo airbender build >/dev/null 2>&1 ) \
+echo "[probe] building guest with ${heap_mib} MiB heap (features: ${PROBE_GUEST_FEATURES:-none}) ..." >&2
+# PROBE_GUEST_FEATURES (e.g. relax-version-pin) lets the probe measure batches the
+# default guest's protocol-version pin rejects (513xxx corpus is v29). Markers in
+# the resulting guest do not affect heap behavior. Empty = default build.
+( cd "$repo_root/guest" && cargo airbender build ${PROBE_GUEST_FEATURES:+-- --features "$PROBE_GUEST_FEATURES"} >/dev/null 2>&1 ) \
   || { echo "error: guest build failed (riscv clang? set CC=)" >&2; exit 1; }
 
 echo "[probe] running batch ${batch} ..." >&2
 log="$(mktemp)"
 set +e
-cargo run --release -p eravm-prover-host --locked -- \
+cargo run --release -p eravm-prover-host --locked \
+  ${PROBE_HOST_FEATURES:+--features "$PROBE_HOST_FEATURES"} -- \
   run --batches-dir "$repo_root/testdata/era_mainnet_batches/binary" \
   --batch-files "$batch" >"$log" 2>&1
 rc=$?
