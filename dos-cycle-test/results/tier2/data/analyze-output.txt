@@ -1,0 +1,17 @@
+size_words      bytes clone     cyc/decode    setup_cyc
+      3072      98304     0      5,716,514   16,781,824
+     16384     524288     0     30,476,841   20,189,701
+     32768    1048576     0     35,736,111   24,384,005
+     65535    2097120     0     46,254,318   32,772,357
+     65535    2097120     1     47,434,425   32,772,363
+
+2 MiB / 512 KiB decode ratio (RISC-V): 1.52x (native x86 bench measured 1.83x)
+#93 per-miss clone add-on @2MiB: 1,180,107 cyc (2.6% of the decode)
+
+prover ceiling 2^36 = 68,719,476,736
+using measured cyc/decode (2 MiB, +#93 clone) = 47,434,425
+per-iter ergs     misses     total cycles   x 2^36
+          183    391,319 18,561,995,644,643   270.1x
+          200    358,057 16,984,226,014,848   247.2x
+          223    321,127 15,232,489,699,415   221.7x
+          250    286,446 13,587,380,811,878   197.7x

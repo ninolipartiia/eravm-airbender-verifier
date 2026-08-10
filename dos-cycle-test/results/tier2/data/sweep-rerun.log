@@ -1,0 +1,22 @@
+k=64 size_words=65535 do_clone=0 cycles_executed=2993048709
+k=192 size_words=65535 do_clone=0 cycles_executed=8913601413
+k=64 size_words=65535 do_clone=1 cycles_executed=3068575563
+k=192 size_words=65535 do_clone=1 cycles_executed=9140181963
+k=64 size_words=32768 do_clone=0 cycles_executed=2311495109
+k=192 size_words=32768 do_clone=0 cycles_executed=6885717317
+k=64 size_words=16384 do_clone=0 cycles_executed=1970707525
+k=192 size_words=16384 do_clone=0 cycles_executed=5871743173
+k=128 size_words=3072 do_clone=0 cycles_executed=748495621
+k=384 size_words=3072 do_clone=0 cycles_executed=2211923215
+=== wrote artifacts/decode-bench/sweep.csv ===
+size_words,do_clone,k,cycles
+65535,0,64,2993048709
+65535,0,192,8913601413
+65535,1,64,3068575563
+65535,1,192,9140181963
+32768,0,64,2311495109
+32768,0,192,6885717317
+16384,0,64,1970707525
+16384,0,192,5871743173
+3072,0,128,748495621
+3072,0,384,2211923215
