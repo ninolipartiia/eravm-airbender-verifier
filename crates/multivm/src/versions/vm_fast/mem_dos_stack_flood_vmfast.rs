@@ -444,3 +444,83 @@ fn mem_dos_stack_flood_vmfast() {
     println!("\nstack term is ~vm2-arm-independent: the flood re-pops only the TOP pool slot, so #115");
     println!("does not reclaim the deep pool either (measured delta #115 vs #124 ~= 4 MiB).");
 }
+
+/// Finding 3 — **an inflated stack pool survives a rollback**, so the transaction that inflates it
+/// does not have to succeed.
+///
+/// `stack_pool` is a field of `VirtualMachine`, while `VmSnapshot` carries only `world_snapshot` +
+/// `state_snapshot`, and `State::snapshot` does not include the pool. Reading the source says the
+/// pool cannot be rolled back; this executes it end-to-end through the public snapshot API, which is
+/// exactly the sequence the bootloader performs around a transaction it may revert:
+/// `make_snapshot` -> tx inflates the pool -> `rollback`.
+///
+/// Note `rollback` does deallocate non-pinned heaps, so residency legitimately dips; the assertion
+/// is that the stack-pool-sized bulk is still resident afterwards.
+#[test]
+#[ignore = "node-free stack-pool rollback survival check; run with --ignored"]
+fn mem_dos_stack_pool_survives_rollback() {
+    let g_rec: u32 = std::env::var("MEM_DOS_GAS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20_000_000);
+    let write_on_unwind = std::env::var("MEM_DOS_WRITE_ORDER").map_or(true, |v| v != "in");
+    let s = 4096usize; // tiny victims: this test is about the stack pool, not the flood
+    let base = 0x10000u64;
+    let words = s / 32;
+
+    let mut storage = build_storage(1, s, base);
+    let mat_info = code_info(MAT_ID, words);
+    storage.code_keys.insert(
+        code_info_key(U256::from_big_endian(MAT.as_bytes())),
+        u256_to_h256(mat_info),
+    );
+    let mut pinned = HashMap::new();
+    pinned.insert(mat_info, materializer(write_on_unwind));
+    pinned.insert(U256::from(AA_HASH), aa_program());
+    let mut world: W = World::new(storage, pinned);
+
+    let baseline = LIVE.load(Ordering::Relaxed);
+    let mut vm = VirtualMachine::new(
+        DRIVER,
+        driver(g_rec, 0), // phase 2 gets no gas: inflate the pool only
+        Address::zero(),
+        &[],
+        driver_gas(g_rec as u64),
+        Settings {
+            default_aa_code_hash: u256_to_h256(U256::from(AA_HASH)).to_fixed_bytes(),
+            evm_interpreter_code_hash: [0; 32],
+            hook_address: 0,
+        },
+    );
+
+    // The bootloader's pre-transaction snapshot.
+    vm.make_snapshot();
+    let end = vm.run(&mut world, &mut ());
+    let after_run = LIVE.load(Ordering::Relaxed).saturating_sub(baseline);
+
+    // The transaction reverts and the bootloader rolls the VM back.
+    vm.rollback();
+    let after_rollback = LIVE.load(Ordering::Relaxed).saturating_sub(baseline);
+
+    println!(
+        "ROLLBACK end={end:?} write_on_unwind={write_on_unwind} gas={g_rec}\n  \
+         resident after run      = {:.1} MiB\n  \
+         resident after rollback = {:.1} MiB  ({:.1}% retained)",
+        mb(after_run as f64),
+        mb(after_rollback as f64),
+        100.0 * after_rollback as f64 / (after_run as f64).max(1.0)
+    );
+
+    assert!(
+        mb(after_run as f64) > 100.0,
+        "phase 1 did not inflate the pool ({:.1} MiB)",
+        mb(after_run as f64)
+    );
+    assert!(
+        after_rollback * 10 >= after_run * 9,
+        "expected the stack pool to survive rollback, but residency fell from {:.1} to {:.1} MiB",
+        mb(after_run as f64),
+        mb(after_rollback as f64)
+    );
+    println!("  => the pool is NOT undone by rollback: a REVERTED tx still leaves it resident.");
+}

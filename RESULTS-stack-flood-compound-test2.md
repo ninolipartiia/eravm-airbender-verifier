@@ -243,3 +243,45 @@ reachable surface — the pool is not undone by rollback, only by the VM being d
   memory for the split attack is open.
 - `B_min = 160 MiB` remains the only estimated term, and the corrected Case A margin (−13 @950) is
   now well inside its uncertainty — the verdict at 20M is "at the cap", not comfortably either side.
+
+---
+
+# Revision 3 — closing the two gaps Revision 2 left
+
+## Finding 3 now has a test (it was source-reading only)
+
+`mem_dos_stack_pool_survives_rollback` drives the real bootloader sequence through vm2's public
+snapshot API — `make_snapshot()` -> a transaction inflates the pool -> `rollback()` — and measures
+residency either side. Both arms, 20M:
+
+| arm | resident after run | resident after rollback | retained |
+|---|---|---|---|
+| #115 | 461.4 MiB | 461.4 MiB | **100.0%** |
+| #124 | 463.4 MiB | 463.4 MiB | **100.0%** |
+
+Not "mostly" retained — *exactly* unchanged. `rollback()` does deallocate non-pinned heaps, so the
+test allows a 10% dip; none occurs, because the pool is not part of `VmSnapshot` at all.
+**A transaction that reverts still leaves the pool resident for the rest of the batch**, so the
+attacker never needs the inflating transaction to succeed.
+
+## The corrected numbers, on both arms
+
+Revision 2's corrected figures were measured on #115 only. Re-run on #124 (`vm2-all-four`,
+`cargo metadata` confirmed):
+
+| N | case | #115 | #124 | delta |
+|---|---|---|---|---|
+| 15M | A worst split (g_rec=4M) | 790 | 794 | 4 |
+| 15M | B (2 txs) | 1100 | 1104 | 4 |
+| 20M | A all-flood | 850 | 850 | 0 |
+| 20M | A worst split (g_rec=4M) | **963 (FAIL @950 −13)** | **967 (FAIL @950 −17)** | **4** |
+| 20M | B (2 txs) | 1309 | 1313 | 4 |
+| 20M | rollback-survival | 461.4 | 463.4 | 2 |
+
+Still a flat ~4 MiB, so the attacker-optimal shape does **not** change arm-independence — as
+expected, since materializing on unwind still never re-pops the deep pool slots. Every Revision 2
+conclusion, including the 20M failure at the 950 cap, holds on both arms.
+
+Also visible at 20M: the split at `g_rec=2M` lands on **945 (#115) / 945 (#124)** — PASS by 5 — and
+at 4M on 963/967. The margin either side of the cap is inside the `B_min` uncertainty, so the honest
+reading remains "a single 20M transaction sits at the cap", now measured on both arms.
