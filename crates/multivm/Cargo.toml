@@ -18,6 +18,10 @@ default = ["circuit_tracer"]
 # (`default-features = false`) to skip per-opcode circuit accounting and the f32
 # ratio math in-circuit.
 circuit_tracer = []
+# Compiles the standalone memory-DoS far-call-flood measurement harness
+# (`vm_fast::mem_dos_flood_vmfast`, a `#[test] #[ignore]`). Off by default so it
+# has zero impact on normal builds/tests (it installs a tracking global allocator).
+mem-dos-flood-test = []
 
 [dependencies]
 zk_evm_1_5_2.workspace = true

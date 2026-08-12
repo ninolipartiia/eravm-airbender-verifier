@@ -91,8 +91,8 @@ airbender-codec = { git = "https://github.com/matter-labs/airbender-platform", t
 # workspace dep — a member's `default-features = false` is otherwise ignored.
 airbender-host = { git = "https://github.com/matter-labs/airbender-platform", tag = "v0.2.4", default-features = false }
 airbender-crypto = { git = "https://github.com/matter-labs/airbender-platform", tag = "v0.2.4" }
-circuit_sequencer_api = { git = "https://github.com/matter-labs/zksync-protocol", tag = "v0.153.13" }
-zk_evm_1_5_2 = { package = "zk_evm", git = "https://github.com/matter-labs/zksync-protocol", tag = "v0.153.13" }
+circuit_sequencer_api = { git = "https://github.com/matter-labs/zksync-protocol", tag = "v0.153.14" }
+zk_evm_1_5_2 = { package = "zk_evm", git = "https://github.com/matter-labs/zksync-protocol", tag = "v0.153.14" }
 # `default-features = false` drops the wrapper's default `security_80` so it
 # doesn't collide with `security_100` — airbender-host's `SecurityLevel`
 # defaults to `Bits100`, which produces two unified proofs; the wrapper must
@@ -131,3 +131,12 @@ debug = 0
 debug = 0
 [profile.release.package.setups]
 debug = 0
+
+# Redirect zksync_vm2 to the four-PR sparse-memory bundle (vm2 master + PR#124/#115
+# sparse stacks + PR#125/#116 sparse heaps = branch bench/mall-all-four). The flood
+# harness's heap-pin term is a dense code page untouched by these PRs, so results are
+# vm2-version-identical to v0.6.0 (verified) — this pins the config the numbers claim.
+# The zksync-protocol bump to v0.153.14 above matches this vm2's zk_evm_abstractions pin.
+[patch."https://github.com/matter-labs/vm2"]
+zksync_vm2 = { git = "https://github.com/ninolipartiia/vm2", branch = "bench/mall-all-four" }
+zksync_vm2_interface = { git = "https://github.com/ninolipartiia/vm2", branch = "bench/mall-all-four" }
