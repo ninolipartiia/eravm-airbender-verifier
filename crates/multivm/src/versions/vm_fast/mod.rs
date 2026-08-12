@@ -17,3 +17,5 @@ mod utils;
 mod version;
 mod vm;
 mod world;
+#[cfg(all(test, feature = "mem-dos-flood-test"))]
+mod mem_dos_flood_vmfast;
