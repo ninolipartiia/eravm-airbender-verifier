@@ -58,8 +58,8 @@ use super::world::World;
 use crate::interface::storage::ReadStorage;
 
 // ------------------------------------------------------------------- tracking allocator
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
+pub(super) static LIVE: AtomicUsize = AtomicUsize::new(0);
+pub(super) static PEAK: AtomicUsize = AtomicUsize::new(0);
 
 struct Tracking;
 unsafe impl GlobalAlloc for Tracking {
@@ -89,22 +89,22 @@ unsafe impl GlobalAlloc for Tracking {
 static A: Tracking = Tracking;
 
 
-const ATTACKER: Address = H160([0x11; 20]);
-const ATTACKER_HASH: u64 = 0xA77ac6e5;
-const AA_HASH: u64 = 0xAA;
-const FAR_CALL_COST: u32 = 183;
-const RICH_COST: u32 = 6;
+pub(super) const ATTACKER: Address = H160([0x11; 20]);
+pub(super) const ATTACKER_HASH: u64 = 0xA77ac6e5;
+pub(super) const AA_HASH: u64 = 0xAA;
+pub(super) const FAR_CALL_COST: u32 = 183;
+pub(super) const RICH_COST: u32 = 6;
 
 type W = World<MockStorage, ()>;
 type Prog = Program<(), W>;
 
-fn args(cost: u32) -> Arguments {
+pub(super) fn args(cost: u32) -> Arguments {
     Arguments::new(Predicate::Always, cost, ModeRequirements::none())
 }
 
 /// A distinct S-byte cold bytecode. Content-independent decode (per `dos_tier3`), first byte =
 /// idx for distinctness so every far call is a program_cache MISS → `Program::new` → cap accounting.
-fn blob(idx: u64, s: usize) -> Vec<u8> {
+pub(super) fn blob(idx: u64, s: usize) -> Vec<u8> {
     let mut v = vec![0u8; s];
     let seed = (idx as u8).wrapping_add(1);
     for (i, b) in v.iter_mut().enumerate() {
@@ -121,7 +121,7 @@ fn deployer() -> Address {
 /// `TestWorld::new`'s encoding: byte[0]=1 (deployed marker), byte[2..=3]=code_len (words),
 /// byte[24..]=distinct id. byte[1] is 0 (the far-call zeroes it to form the decommit hash), so
 /// this value doubles as the `code_key` / factory-dep hash.
-fn code_info(i: u64, words: usize) -> U256 {
+pub(super) fn code_info(i: u64, words: usize) -> U256 {
     // code_len is a u16 (max on-chain bytecode = 65535 words = ~2 MiB); guard the silent wrap so a
     // large MEM_DOS_S can't produce a mis-sized code page.
     assert!(words <= u16::MAX as usize, "S too large: {words} words exceeds u16 code_len");
@@ -133,7 +133,7 @@ fn code_info(i: u64, words: usize) -> U256 {
 }
 
 /// Minimal default-AA (`ret`): far-calls PAST the N victims land here; all dedup to one page.
-fn aa_program() -> Prog {
+pub(super) fn aa_program() -> Prog {
     Program::from_raw(
         vec![Instruction::from_ret(Register1(Register::new(0)), None, args(RICH_COST))],
         vec![U256::zero()],
@@ -142,7 +142,7 @@ fn aa_program() -> Prog {
 
 /// Attacker: far-call victims base+1..=base+N once each, gas_to_pass=0; loop on panic. Counter in
 /// caller heap (registers are cleared by far-call). Mirrors the TestWorld flood harness.
-fn flood_loop(base: u64) -> Prog {
+pub(super) fn flood_loop(base: u64) -> Prog {
     let r0 = Register::new(0);
     let r_abi = Register::new(1);
     let r_dst = Register::new(3);
@@ -207,10 +207,10 @@ fn flood_loop(base: u64) -> Prog {
 /// Storage serving the flood: code-key(addr) → victim hash (so far-call resolves it) and
 /// load_factory_dep(hash) → the S-byte bytecode. Non-panicking zero defaults for everything else.
 #[derive(Debug)]
-struct MockStorage {
-    code_keys: HashMap<StorageKey, StorageValue>,
-    deps: HashMap<H256, Vec<u8>>,
-    lfd_calls: usize,
+pub(super) struct MockStorage {
+    pub(super) code_keys: HashMap<StorageKey, StorageValue>,
+    pub(super) deps: HashMap<H256, Vec<u8>>,
+    pub(super) lfd_calls: usize,
 }
 impl ReadStorage for MockStorage {
     fn read_value(&mut self, key: &StorageKey) -> StorageValue {
@@ -229,11 +229,11 @@ impl ReadStorage for MockStorage {
 }
 
 /// Storage key the far-call reads for `address`'s code info: `(DEPLOYER, address_as_u256)`.
-fn code_info_key(addr_u256: U256) -> StorageKey {
+pub(super) fn code_info_key(addr_u256: U256) -> StorageKey {
     StorageKey::new(AccountTreeId::new(deployer()), u256_to_h256(addr_u256))
 }
 
-fn build_storage(n: u64, s: usize, base: u64) -> MockStorage {
+pub(super) fn build_storage(n: u64, s: usize, base: u64) -> MockStorage {
     let words = s / 32;
     let mut code_keys = HashMap::new();
     let mut deps = HashMap::new();
@@ -247,15 +247,15 @@ fn build_storage(n: u64, s: usize, base: u64) -> MockStorage {
     MockStorage { code_keys, deps, lfd_calls: 0 }
 }
 
-struct Out {
-    peak: usize,
-    baseline: usize,
-    lfd: usize,
-    extra: String,
+pub(super) struct Out {
+    pub(super) peak: usize,
+    pub(super) baseline: usize,
+    pub(super) lfd: usize,
+    pub(super) extra: String,
 }
 
 /// Part A — decommit-only flood over the REAL World. Isolates the program_cache term + cap.
-fn run_decommit_flood(n: u64, s: usize, base: u64) -> Out {
+pub(super) fn run_decommit_flood(n: u64, s: usize, base: u64) -> Out {
     let storage = build_storage(n, s, base);
     let mut world: W = World::new(storage, HashMap::new());
 
@@ -276,6 +276,17 @@ fn run_decommit_flood(n: u64, s: usize, base: u64) -> Out {
         lfd: 0,
         extra: format!("bytecode_cache={bc} entries (expected 0 — storage-served not cached)"),
     }
+}
+
+/// Per-victim gas: decommit(S/8) + far-call + loop overhead. Shared with the stack+flood sibling.
+pub(super) fn per_gas_for(s: usize) -> u64 {
+    (s as u64 / 8) + FAR_CALL_COST as u64 + 60
+}
+
+/// Flood-only run at an explicit victim count — the reference the stack+flood sibling differences
+/// against to isolate the stack term.
+pub(super) fn run_vm_flood_n(n: u64, s: usize, gas: u32, base: u64) -> Out {
+    run_vm_flood(n, s, gas, base)
 }
 
 /// Part B — full combined run: real VirtualMachine over the real World. Captures heap-pin +
@@ -323,7 +334,7 @@ fn mem_dos_flood_vmfast() {
     // The ONLY estimated term: the adversarial-minimal guest baseline (bootloader + system contracts
     // + tree + non-flood input), rv32 MiB. Everything else below is MEASURED. Override: MEM_DOS_BMIN.
     let b_min_rv32: f64 = std::env::var("MEM_DOS_BMIN").ok().and_then(|v| v.parse().ok()).unwrap_or(160.0);
-    let per_gas = (s as u64 / 8) + FAR_CALL_COST as u64 + 60; // decommit(S/8) + far-call + loop
+    let per_gas = per_gas_for(s); // decommit(S/8) + far-call + loop
     let mb = |bytes: f64| bytes / (1u64 << 20) as f64;
     let cap950 = 950.0_f64;
 
