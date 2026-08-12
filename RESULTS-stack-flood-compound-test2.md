@@ -1,3 +1,10 @@
+> **⚠️ SUPERSEDED IN PART — see "Revision 2" at the end.** A self-review found the phase-1 attack
+> shape in the original run was suboptimal (it materialized stacks *before* recursing, which caps
+> depth) and that the driver under-funded the flood phase by 1/64. Both are fixed. The corrected
+> numbers are materially worse: **a single 20M tx now FAILS the 950 cap (963 MiB, −13)** where this
+> document's Case A originally reported PASS +68. Case A/B tables below are the pre-fix measurements;
+> the mechanism, arm-independence and methodology sections remain valid.
+
 # Test 2 — stack pool + decommit flood, co-resident (1 tx vs 2 txs)
 
 Harness: `crates/multivm/src/versions/vm_fast/mem_dos_stack_flood_vmfast.rs` (branch
@@ -149,3 +156,90 @@ The attacker chooses the shape — and the shape that **maximizes total memory**
 sublinear tail). The deep-recursion shape that would let `#115` reclaim is the attacker's *worse*
 option. Hence the worst case is arm-independent, and `#124` is not what makes the compound attack
 work.
+
+
+---
+
+# Revision 2 — self-review corrections
+
+Two defects in the original measurement, both found by reviewing my own harness adversarially.
+
+## Defect 1 — the phase-1 attack shape was suboptimal (understated the pool by 1.34–1.55x)
+
+The materializer wrote its stack **before** recursing. That subtracts the per-frame write cost
+*before* the 63/64 decay at every deeper level, so it compounds and caps depth (~166 frames @20M).
+A frame that materializes **after its callee returns** gets the subtree's unspent gas back
+(`naked_ret` credits `leftover_gas` to the caller), so the same budget materializes far more frames.
+
+Measured, pure vm2 (`stack_sink_write_order`), pool MiB:
+
+| gas | write before recursing (old) | write on unwind (attacker-optimal) | ratio |
+|---|---|---|---|
+| 2M | 106.7 | 165.5 | 1.55x |
+| 15M | 305.7 | 425.5 | 1.39x |
+| 20M | 339.9 | **462.7** | 1.36x |
+| 25M | 366.9 | 491.6 | 1.34x |
+
+This is near-optimal, not a stepping stone to something much larger: the analytic bound is
+`writers in [d, D] <= g_d / cost_per_frame`, maximized by concentrating writers shallow, giving
+~225 frames @20M; measured 216 (~4% off). The harness now defaults to this shape
+(`MEM_DOS_WRITE_ORDER=in` selects the weaker one).
+
+## Defect 2 — the driver under-funded the flood phase (1/64 far-call tax)
+
+A far-call delivers only 63/64 of what the caller holds, so with a flat 300k of slack the flood
+phase silently received less than its requested `g_flood` and decommitted **3 fewer victims** than
+the flood-only run it was differenced against — biasing the isolated stack term. Now the driver
+sizes its own gas (`driver_gas`), and **both cases assert `comb.lfd == f_only.lfd`**, so the
+differencing can no longer be silently invalid. That assertion is what caught this.
+
+## Corrected results (attacker-optimal shape, verified equal flood work)
+
+### Case A — 1 tx, worst split over `g_rec` (tot_rv32 MiB, B_min=160)
+
+| N | all-flood | worst split | worst `g_rec` | @768 | @950 |
+|---|---|---|---|---|---|
+| 12M | 573 | 686 | 4M | PASS +82 | PASS +264 |
+| 15M | 677 | 790 | 4M | FAIL −22 | PASS +160 |
+| 18M | 779 | 892 | 4M | FAIL −124 | PASS +58 |
+| **20M** | 850 | **963** | **4M** | FAIL −195 | **FAIL −13** |
+
+At 20M the split beats a pure flood by **+113 MiB** (963 vs 850), not the +32 measured before — so
+the "all-flood is the max / sinks sub-additive" conclusion is violated by a wide margin, and the
+optimum moved from `g_rec=2M` to `4M`. **A single 20M transaction no longer fits the 950 cap.**
+
+### Case B — 2 txs (tot_rv32 MiB)
+
+| N per tx | stack | flood | tot_rv32 | @768 | @950 |
+|---|---|---|---|---|---|
+| 12M | 393 | 368 | 966 | FAIL −198 | FAIL −16 |
+| 15M | 422 | 461 | 1100 | FAIL −332 | FAIL −150 |
+| 18M | 446 | 552 | 1225 | FAIL −457 | FAIL −275 |
+| 20M | 459 | 614 | **1309** | FAIL −541 | FAIL −359 |
+
+End-of-run residency for 2x20M is **1072 MiB** measured directly — over the cap on its own.
+
+### Corrected safe per-tx ceilings
+
+| model | @768 MiB | @950 MiB |
+|---|---|---|
+| flood only | ~17.5M | ~22.9M |
+| 1 tx, optimal split — *was* | ~16.5M | ~21.8M |
+| **1 tx, optimal split — corrected** | **~14.4M** | **~19.6M** |
+| 2 txs — *was* | ~10M | ~14M |
+| **2 txs — corrected** | **~7.5M** | **~11.8M** |
+
+## Defect 3 (not a miscalculation — a missed reachability point)
+
+`stack_pool` is a field of `VirtualMachine`; `VmSnapshot` carries only `state_snapshot`, and
+`State::snapshot` does not include the pool. **So a transaction that reverts still leaves the pool
+inflated.** The attacker never needs the inflating transaction to succeed, which widens the
+reachable surface — the pool is not undone by rollback, only by the VM being dropped.
+
+## What is still unverified
+
+- k >= 3 txs still not measured directly (pool saturation + linear flood is an argument).
+- The cycle cost of the phase-1 recursion is not measured; whether the 2^36 cycle limit binds before
+  memory for the split attack is open.
+- `B_min = 160 MiB` remains the only estimated term, and the corrected Case A margin (−13 @950) is
+  now well inside its uncertainty — the verdict at 20M is "at the cap", not comfortably either side.

