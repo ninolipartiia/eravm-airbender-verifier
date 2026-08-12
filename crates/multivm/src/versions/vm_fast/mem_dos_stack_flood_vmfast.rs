@@ -225,12 +225,14 @@ fn run_stack_then_flood(
     // silently fall through to the default AA and the phase would be a no-op).
     let mat_info = code_info(MAT_ID, words);
     let att_info = code_info(ATT_ID, words);
-    storage
-        .code_keys
-        .insert(code_info_key(U256::from_big_endian(MAT.as_bytes())), u256_to_h256(mat_info));
-    storage
-        .code_keys
-        .insert(code_info_key(U256::from_big_endian(ATTACKER.as_bytes())), u256_to_h256(att_info));
+    storage.code_keys.insert(
+        code_info_key(U256::from_big_endian(MAT.as_bytes())),
+        u256_to_h256(mat_info),
+    );
+    storage.code_keys.insert(
+        code_info_key(U256::from_big_endian(ATTACKER.as_bytes())),
+        u256_to_h256(att_info),
+    );
     // Pinned => program_cache hit, so neither attacker program adds a decode term to the flood's.
     let mut pinned = HashMap::new();
     pinned.insert(mat_info, materializer(write_on_unwind));
@@ -264,7 +266,10 @@ fn run_stack_then_flood(
         peak: peak.saturating_sub(baseline),
         baseline,
         lfd,
-        extra: format!("end={end:?} retained_MiB={:.1}", retained as f64 / (1u64 << 20) as f64),
+        extra: format!(
+            "end={end:?} retained_MiB={:.1}",
+            retained as f64 / (1u64 << 20) as f64
+        ),
     }
 }
 
@@ -316,27 +321,51 @@ fn mem_dos_stack_flood_vmfast() {
             .unwrap_or(dflt)
     };
     let n_sweep = parse_sweep("MEM_DOS_N_SWEEP", vec![20_000_000]);
-    let rec_sweep = parse_sweep("MEM_DOS_REC_SWEEP", vec![0, 1_000_000, 2_000_000, 3_000_000, 5_000_000]);
+    let rec_sweep = parse_sweep(
+        "MEM_DOS_REC_SWEEP",
+        vec![0, 1_000_000, 2_000_000, 3_000_000, 5_000_000],
+    );
     let base: u64 = 0x10000;
     let per_gas = per_gas_for(s);
     // Attacker-optimal phase-1 shape by default; set MEM_DOS_WRITE_ORDER=in for the weaker one.
     let write_on_unwind = std::env::var("MEM_DOS_WRITE_ORDER").map_or(true, |v| v != "in");
 
     println!("\n=== stack pool + decommit flood, CO-RESIDENT (real vm_fast::World) ===");
-    println!("S={} KiB/contract, per_victim_gas={per_gas}. B_min(rv32)={b_min_rv32:.0} MiB.", s / 1024);
+    println!(
+        "S={} KiB/contract, per_victim_gas={per_gas}. B_min(rv32)={b_min_rv32:.0} MiB.",
+        s / 1024
+    );
     println!("DUAL CAP: 768 MiB (verified current) and 950 MiB (override).");
     println!("stack term converts 1:1 native->rv32; flood instructions 16->12 B.");
-    println!("phase-1 shape: materialize {} (write_on_unwind={write_on_unwind})", if write_on_unwind { "ON UNWIND (attacker-optimal)" } else { "before recursing (weaker)" });
+    println!(
+        "phase-1 shape: materialize {} (write_on_unwind={write_on_unwind})",
+        if write_on_unwind {
+            "ON UNWIND (attacker-optimal)"
+        } else {
+            "before recursing (weaker)"
+        }
+    );
 
     // Reference: flood-ONLY at each N (g_rec = 0), the prior 'all-flood is the max' baseline.
     for &big_n in &n_sweep {
-        println!("\n--------- per-tx gas budget N = {:.0}M ---------", big_n as f64 / 1e6);
+        println!(
+            "\n--------- per-tx gas budget N = {:.0}M ---------",
+            big_n as f64 / 1e6
+        );
 
         // ---- Case A: ONE tx. Phases share N, so they compete for gas. ----
         println!("\n[Case A] 1 tx: phase1 + phase2 share N (they COMPETE for gas)");
         println!(
             "{:>8} {:>8} {:>5} | {:>9} {:>9} {:>9} | {:>9} | {:>13} {:>13}",
-            "g_recM", "g_fldM", "N_vic", "stack_nat", "flood_nat", "fp_rv32", "tot_rv32", "verdict768", "verdict950"
+            "g_recM",
+            "g_fldM",
+            "N_vic",
+            "stack_nat",
+            "flood_nat",
+            "fp_rv32",
+            "tot_rv32",
+            "verdict768",
+            "verdict950"
         );
         let mut best: Option<(f64, u64)> = None;
         for &g_rec in &rec_sweep {
@@ -346,7 +375,12 @@ fn mem_dos_stack_flood_vmfast() {
             let g_flood = big_n - g_rec;
             let n = (g_flood / per_gas).max(1);
             // flood-only reference at the SAME victim count -> isolates the stack term by differencing.
-            let f_only = run_vm_flood_n(n, s, (n * per_gas + 300_000).min(u32::MAX as u64) as u32, base);
+            let f_only = run_vm_flood_n(
+                n,
+                s,
+                (n * per_gas + 300_000).min(u32::MAX as u64) as u32,
+                base,
+            );
             let part_a = run_decommit_flood(n, s, base); // program_cache alone
             let comb = run_stack_then_flood(
                 n,
@@ -383,7 +417,10 @@ fn mem_dos_stack_flood_vmfast() {
                 v(950.0)
             );
             println!("      lfd comb={} vs flood-only={} (must match, else the differenced stack term is wrong) | {} | {}", comb.lfd, f_only.lfd, comb.extra, f_only.extra);
-            assert_eq!(comb.lfd, f_only.lfd, "combined run did not decommit the same victim count as the flood-only reference");
+            assert_eq!(
+                comb.lfd, f_only.lfd,
+                "combined run did not decommit the same victim count as the flood-only reference"
+            );
             if best.map_or(true, |(b, _)| tot > b) {
                 best = Some((tot, g_rec));
             }
@@ -398,7 +435,12 @@ fn mem_dos_stack_flood_vmfast() {
         // ---- Case B: TWO txs. Each phase gets its own full N -> no gas competition. ----
         println!("\n[Case B] 2 txs: tx1 = full N on stack inflation, tx2 = full N on flood (pool persists across txs)");
         let n = (big_n / per_gas).max(1);
-        let f_only = run_vm_flood_n(n, s, (n * per_gas + 300_000).min(u32::MAX as u64) as u32, base);
+        let f_only = run_vm_flood_n(
+            n,
+            s,
+            (n * per_gas + 300_000).min(u32::MAX as u64) as u32,
+            base,
+        );
         let part_a = run_decommit_flood(n, s, base);
         let comb = run_stack_then_flood(
             n,
@@ -432,8 +474,14 @@ fn mem_dos_stack_flood_vmfast() {
             v(768.0),
             v(950.0)
         );
-        println!("      lfd comb={} vs flood-only={} | {} | {}", comb.lfd, f_only.lfd, comb.extra, f_only.extra);
-        assert_eq!(comb.lfd, f_only.lfd, "combined run did not decommit the same victim count as the flood-only reference");
+        println!(
+            "      lfd comb={} vs flood-only={} | {} | {}",
+            comb.lfd, f_only.lfd, comb.extra, f_only.extra
+        );
+        assert_eq!(
+            comb.lfd, f_only.lfd,
+            "combined run did not decommit the same victim count as the flood-only reference"
+        );
         // The pool must actually have been built, else the phases mis-sequenced (see `run_stack_then_flood`).
         assert!(
             mb(stack_nat) > 40.0,
@@ -441,7 +489,9 @@ fn mem_dos_stack_flood_vmfast() {
             mb(stack_nat)
         );
     }
-    println!("\nstack term is ~vm2-arm-independent: the flood re-pops only the TOP pool slot, so #115");
+    println!(
+        "\nstack term is ~vm2-arm-independent: the flood re-pops only the TOP pool slot, so #115"
+    );
     println!("does not reclaim the deep pool either (measured delta #115 vs #124 ~= 4 MiB).");
 }
 
